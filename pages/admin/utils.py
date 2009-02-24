@@ -20,7 +20,10 @@ def get_placeholders(request, template_name):
         context = details(request, only_context=True)
     except Http404:
         context = {}
-    temp.render(RequestContext(request, context))
+    from copy import copy
+    r = copy(request)
+    r.method = 'GET'
+    temp.render(RequestContext(r, context))
     list = []
     placeholders_recursif(temp.nodelist, list)
     return list
