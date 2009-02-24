@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from os.path import join
 from inspect import isclass, getmembers
 
@@ -18,7 +19,7 @@ from pages.utils import get_template_from_request, has_page_add_permission, \
 from pages.admin import widgets
 from pages.admin.forms import PageForm
 from pages.admin.utils import get_placeholders, get_connected_models
-from pages.admin.views import traduction, get_content, valid_targets_list, \
+from pages.admin.views import traduction, get_content, sub_menu, \
     change_status, modify_content
 
 class PageAdmin(admin.ModelAdmin):
@@ -27,7 +28,11 @@ class PageAdmin(admin.ModelAdmin):
     exclude = ['author', 'parent']
     # these mandatory fields are not versioned
     mandatory_placeholders = ('title', 'slug')
-    general_fields = ['title', 'slug', 'status', 'sites']
+    general_fields = ['title', 'slug', 'status']
+
+    # TODO: find solution to do this dynamically
+    #if getattr(settings, 'PAGE_USE_SITE_ID'):
+    general_fields.append('sites')
     insert_point = general_fields.index('status') + 1
 
     if settings.PAGE_TAGGING:
@@ -85,8 +90,8 @@ class PageAdmin(admin.ModelAdmin):
             page_id, action, content_id, language_id = url.split('/')
             return modify_content(request, unquote(page_id),
                                     unquote(content_id), unquote(language_id))
-        elif url.endswith('/valid-targets-list'):
-            return valid_targets_list(request, unquote(url[:-19]))
+        elif url.endswith('/sub-menu'):
+            return sub_menu(request, unquote(url[:-9]))
         elif url.endswith('/move-page'):
             return self.move_page(request, unquote(url[:-10]))
         elif url.endswith('/change-status'):
@@ -112,15 +117,18 @@ class PageAdmin(admin.ModelAdmin):
         Content object.
         """
         obj.save()
+        
         language = form.cleaned_data['language']
         target = request.GET.get('target', None)
         position = request.GET.get('position', None)
+        
         if target is not None and position is not None:
             try:
                 target = self.model.objects.get(pk=target)
             except self.model.DoesNotExist:
                 pass
             else:
+                target.invalidate()
                 obj.move_to(target, position)
 
         for mandatory_placeholder in self.mandatory_placeholders:
@@ -142,6 +150,8 @@ class PageAdmin(admin.ModelAdmin):
                 else:
                     Content.objects.set_or_create_content(obj, language,
                         placeholder.name, form.cleaned_data[placeholder.name])
+                        
+        obj.invalidate()
 
     def get_fieldsets(self, request, obj=None):
         """
@@ -158,6 +168,7 @@ class PageAdmin(admin.ModelAdmin):
 
         additional_fieldsets.append((_('Content'), {'fields': placeholder_fieldsets}))
 
+        # deactived for now, create bugs with page with same slug title
         connected_fieldsets = []
         if obj:
             for mod in get_connected_models():
@@ -327,7 +338,6 @@ class PageAdmin(admin.ModelAdmin):
         """
         Move the page to the requested target, at the given position
         """
-        context = {}
         page = Page.objects.get(pk=page_id)
 
         target = request.POST.get('target', None)
@@ -336,13 +346,18 @@ class PageAdmin(admin.ModelAdmin):
             try:
                 target = self.model.objects.get(pk=target)
             except self.model.DoesNotExist:
-                context.update({'error': _('Page could not been moved.')})
+                pass
+                # TODO: should use the django message system 
+                # to display this message
+                # _('Page could not been moved.')
             else:
+                page.invalidate()
+                target.invalidate()
                 page.move_to(target, position)
                 return self.list_pages(request,
                     template_name='admin/pages/page/change_list_table.html')
-        context.update(extra_context or {})
         return HttpResponseRedirect('../../')
+
 admin.site.register(Page, PageAdmin)
 
 class ContentAdmin(admin.ModelAdmin):

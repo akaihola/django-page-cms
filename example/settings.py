@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Django settings for cms project.
 import os
 PROJECT_DIR = os.path.dirname(__file__)
@@ -72,7 +73,7 @@ MIDDLEWARE_CLASSES = (
     'django.middleware.common.CommonMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.middleware.doc.XViewMiddleware',
-    'pages.middleware.CurrentSiteMiddleware',
+    #'pages.middleware.LogSqlMiddleware',
 )
 
 ROOT_URLCONF = 'example.urls'
@@ -83,6 +84,10 @@ TEMPLATE_DIRS = (
     # Don't forget to use absolute paths, not relative paths.
     os.path.join(PROJECT_DIR, 'templates'),
 )
+
+CACHE_BACKEND = "locmem:///?timeout=300&max_entries=6000"
+
+PAGE_CONTENT_CACHE_DURATION = 300
 
 INSTALLED_APPS = (
     'django.contrib.auth',
@@ -106,6 +111,8 @@ LANGUAGES = (
     ('de', gettext_noop('German')),
     ('en', gettext_noop('English')),
 )
+
+SQL_DEBUGGING = False
 
 DEFAULT_PAGE_TEMPLATE = 'pages/index.html'
 

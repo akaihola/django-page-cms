@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Convenience module for access of custom pages application settings,
 which enforces default settings when the main settings module does not
@@ -38,10 +39,13 @@ PAGE_LANGUAGES = getattr(settings, 'PAGE_LANGUAGES', settings.LANGUAGES)
 PAGE_DEFAULT_LANGUAGE = getattr(settings, 'PAGE_DEFAULT_LANGUAGE', settings.LANGUAGE_CODE)[:2]
 
 # Defines how long page content should be cached, including navigation and admin menu.
-PAGE_CONTENT_CACHE_DURATION = getattr(settings, 'PAGE_CONTENT_CACHE_DURATION', 60)
+PAGE_CONTENT_CACHE_DURATION = getattr(settings, 'PAGE_CONTENT_CACHE_DURATION', False)
 
 # The id of default Site instance to be used for multisite purposes.
 SITE_ID = getattr(settings, 'SITE_ID', 1)
+
+# Whether to enable the site framework
+PAGE_USE_SITE_ID = getattr(settings, 'PAGE_USE_SITE_ID', False)
 
 # You can exclude some placeholder from the revision process
 PAGE_CONTENT_REVISION_EXCLUDE_LIST = getattr(settings, 'PAGE_CONTENT_REVISION_EXCLUDE_LIST', ())
@@ -66,3 +70,4 @@ PAGE_SHOW_END_DATE = getattr(settings, 'PAGE_SHOW_END_DATE', False)
 # an automatic form to create and directly link a new instance of this model
 # with your page.
 PAGE_CONNECTED_MODELS = getattr(settings, 'PAGE_CONNECTED_MODELS', False)
+

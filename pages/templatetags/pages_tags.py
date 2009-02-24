@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 from django import template
 from django.core.cache import cache
 from django.utils.safestring import SafeUnicode, mark_safe
 from django.utils.translation import ugettext_lazy as _
 from django.template import Template, TemplateSyntaxError
 from django.conf import settings as global_settings
+import urllib
 
 from pages import settings
 from pages.models import Content, Page
@@ -13,14 +15,18 @@ register = template.Library()
 
 PLACEHOLDER_ERROR = _("[Placeholder %(name)s had syntax error: %(error)s]")
 
-def get_page_children_for_site(page, site):
-    return page.get_children().filter(sites__domain=site.domain)
+# TODO: move that into the manager
+def get_page_children(page):
+    children = page.get_children()
+    if settings.PAGE_USE_SITE_ID:
+        children = children.filter(sites=settings.SITE_ID)
+    return children
 
 def pages_menu(context, page, url='/'):
     """render a nested list of all children of the pages"""
     request = context['request']
-    site = request.site
-    children = get_page_children_for_site(page, site)
+    site_id = None
+    children = get_page_children(page)
     PAGE_CONTENT_CACHE_DURATION = settings.PAGE_CONTENT_CACHE_DURATION
     lang = get_language_from_request(request)
     if 'current_page' in context:
@@ -34,8 +40,9 @@ def pages_sub_menu(context, page, url='/'):
     render a nested list of all root's children pages"""
     root = page.get_root()
     request = context['request']
-    site = request.site
-    children = get_page_children_for_site(page, site)
+
+    children = get_page_children(page)
+
     if 'current_page' in context:
         current_page = context['current_page']
     return locals()
@@ -45,15 +52,16 @@ pages_sub_menu = register.inclusion_tag('pages/sub_menu.html',
 def pages_admin_menu(context, page, url='/admin/pages/page/', level=None):
     """Render the admin table of pages"""
     request = context['request']
-    site = request.site
-    children = get_page_children_for_site(page, site)
+    
+    if "tree_expanded" in request.COOKIES:
+        cookie_string = urllib.unquote(request.COOKIES['tree_expanded'])
+        if cookie_string:
+            ids = [int(id) for id in urllib.unquote(request.COOKIES['tree_expanded']).split(',')]
+            if page.id in ids:
+                expanded = True
+    
     has_permission = page.has_page_permission(request)
-    # level is used to add a left margin on table row
-    if has_permission:
-        if level is None:
-            level = 0
-        else:
-            level = level+3
+
     return locals()
 pages_admin_menu = register.inclusion_tag('admin/pages/page/menu.html',
                                           takes_context=True)(pages_admin_menu)
@@ -76,6 +84,7 @@ def show_content(context, page, content_type, lang=None):
     args -- content_type used by a placeholder
     lang -- the wanted language (default None, use the request object to know)
     """
+
     request = context.get('request', False)
     if not request or not page:
         return {'content':''}
@@ -86,13 +95,17 @@ def show_content(context, page, content_type, lang=None):
             page = c[0].page
         else:
             return {'content':''}
+
     if lang is None:
         lang = get_language_from_request(context['request'])
     if hasattr(settings, 'PAGE_CONTENT_CACHE_DURATION'):
-        key = 'content_cache_pid:'+str(page.id)+'_l:'+str(lang)+'_type:'+str(content_type)
+        key = Page.PAGE_CONTENT_KEY % (page.id, lang, content_type)
         c = cache.get(key)
-        if not c:
+        if c is None:
             c = Content.objects.get_content(page, lang, content_type, True)
+            # Storing None force SQL requests
+            if c is None:
+                c = " "
             cache.set(key, c, settings.PAGE_CONTENT_CACHE_DURATION)
     else:
         c = Content.objects.get_content(page, lang, content_type, True)

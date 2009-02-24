@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import datetime
 
 from django.db import models
@@ -13,6 +14,7 @@ import mptt
 from pages import settings
 from pages.managers import PageManager, ContentManager, PagePermissionManager
 
+
 class Page(models.Model):
     """
     A simple hierarchical page model
@@ -27,22 +29,39 @@ class Page(models.Model):
         (PUBLISHED, _('Published')),
         (HIDDEN, _('Hidden')),
     )
+
+    PAGE_SLUG_KEY = "page_%d_language_%s_slug"
+    PAGE_LANGUAGES_KEY = "page_%d_languages"
+    PAGE_URL_KEY = "page_%d_language_%s_url"
+    PAGE_TEMPLATE_KEY = "page_%d_template"
+    #PAGE_CHILDREN_KEY = "page_children_%d_%d"
+    PAGE_CONTENT_KEY = "page_content_%d_%s_%s"
+
     author = models.ForeignKey(User, verbose_name=_('author'))
-    parent = models.ForeignKey('self', null=True, blank=True, related_name='children', verbose_name=_('parent'))
-    creation_date = models.DateTimeField(_('creation date'), editable=False, default=datetime.now)
-    publication_date = models.DateTimeField(_('publication date'), null=True, blank=True, help_text=_('When the page should go live. Status must be "Published" for page to go live.'))
-    publication_end_date = models.DateTimeField(_('publication end date'), null=True, blank=True, help_text=_('When to expire the page. Leave empty to never expire.'))
+    parent = models.ForeignKey('self', null=True, blank=True, 
+            related_name='children', verbose_name=_('parent'))
+    creation_date = models.DateTimeField(_('creation date'), editable=False, 
+            default=datetime.now)
+    publication_date = models.DateTimeField(_('publication date'), 
+            null=True, blank=True, help_text=_('''When the page should go live. 
+                    Status must be "Published" for page to go live.'''))
+    publication_end_date = models.DateTimeField(_('publication end date'), 
+            null=True, blank=True, help_text=_('''When to expire the page. Leave
+                    empty to never expire.'''))
 
     status = models.IntegerField(_('status'), choices=STATUSES, default=DRAFT)
     template = models.CharField(_('template'), max_length=100, null=True, blank=True)
-    sites = models.ManyToManyField(Site, default=[settings.SITE_ID], help_text=_('The site(s) the page is accessible at.'), verbose_name=_('sites'))
+    
+    # Disable could make site tests fail
+    sites = models.ManyToManyField(Site, default=[settings.SITE_ID], 
+            help_text=_('The site(s) the page is accessible at.'), verbose_name=_('sites'))
 
     # Managers
     objects = PageManager()
 
     if settings.PAGE_TAGGING:
         from tagging import fields
-        tags = fields.TagField()
+        tags = fields.TagField(null=True)
 
     class Meta:
         verbose_name = _('page')
@@ -78,16 +97,39 @@ class Page(models.Model):
 
         return self.status
     calculated_status = property(get_calculated_status)
+
+    def invalidate(self):
+        """Invalidate a page and it's descendants"""
+        self.invalidate_if_parent_changed()
+        cache.delete(self.PAGE_LANGUAGES_KEY % (self.id))
+
+    def invalidate_if_parent_changed(self):
+        """Invalidate cache depending of a parent"""
         
+        cache.delete(self.PAGE_TEMPLATE_KEY % (self.id))
+
+        for lang in settings.PAGE_LANGUAGES:
+            cache.delete(self.PAGE_URL_KEY % (self.id, lang[0]))
+            cache.delete(self.PAGE_SLUG_KEY % (self.id, lang[0]))
+            cache.delete(self.PAGE_CONTENT_KEY % (self.id, lang[0], 'title'))
+            cache.delete(self.PAGE_CONTENT_KEY % (self.id, lang[0], 'slug'))
+            
     def get_languages(self):
         """
         get the list of all existing languages for this page
         """
-        contents = Content.objects.filter(page=self, type="title")
+        languages = cache.get(self.PAGE_LANGUAGES_KEY % (self.id))
+        if languages:
+            return languages
+
         languages = []
-        for c in contents:
-            if c.language not in languages:
-                languages.append(c.language)
+        for lang in settings.PAGE_LANGUAGES:
+            # one request by language to avoid to get huge revisions
+            if Content.objects.filter(language=lang[0], page=self, type="slug").latest.count() > 0:
+           	languages.append(lang[0])
+
+        cache.set(self.PAGE_LANGUAGES_KEY % (self.id), languages)
+
         return languages
 
     def get_absolute_url(self, language=None):
@@ -97,22 +139,38 @@ class Page(models.Model):
         """
         get the url of this page, adding parent's slug
         """
+        url = cache.get(self.PAGE_URL_KEY % (self.id, language))
+        if url:
+            return url
+        
         if settings.PAGE_UNIQUE_SLUG_REQUIRED:
             url = u'%s/' % self.slug(language)
         else:
             url = u'%s-%d/' % (self.slug(language), self.id)
         for ancestor in self.get_ancestors(ascending=True):
             url = ancestor.slug(language) + u'/' + url
+        
+        cache.set(self.PAGE_URL_KEY % (self.id, language), url)
+            
         return url
 
     def slug(self, language=None, fallback=True):
         """
         get the slug of the page depending on the given language
         """
+        slug = cache.get(self.PAGE_SLUG_KEY % (self.id, language))
+        if slug:
+            return slug
+
         if not language:
             language = settings.PAGE_DEFAULT_LANGUAGE
-        return Content.objects.get_content(self, language, 'slug',
+
+        slug = Content.objects.get_content(self, language, 'slug',
                                            language_fallback=fallback)
+
+        cache.set(self.PAGE_URL_KEY % (self.id, language), slug)
+
+        return slug
 
     def title(self, language=None, fallback=True):
         """
@@ -128,12 +186,25 @@ class Page(models.Model):
         get the template of this page if defined or if closer parent if
         defined or DEFAULT_PAGE_TEMPLATE otherwise
         """
+        template = cache.get(self.PAGE_TEMPLATE_KEY % (self.id))
+        if template:
+            return template
+
         if self.template:
-            return self.template
-        for p in self.get_ancestors(ascending=True):
-            if p.template:
-                return p.template
-        return settings.DEFAULT_PAGE_TEMPLATE
+            template = self.template
+
+        if not template:
+            for p in self.get_ancestors(ascending=True):
+                if p.template:
+                    template = p.template
+                    break
+
+        if not template:
+            template = settings.DEFAULT_PAGE_TEMPLATE
+
+        cache.set(self.PAGE_TEMPLATE_KEY % (self.id), template)
+
+        return template
 
     def traductions(self):
         langs = ""
@@ -155,6 +226,16 @@ class Page(models.Model):
             if self.id in permission:
                 return True
             return False
+
+    def with_level(self):
+        level = ''
+        if self.level:
+            for n in range(0, self.level):
+                level += '&nbsp;&nbsp;&nbsp;'  
+        return mark_safe(level + self.__unicode__())
+        
+    def margin_level(self):
+        return self.level * 4 + 1
 
     def __unicode__(self):
         slug = self.slug()
