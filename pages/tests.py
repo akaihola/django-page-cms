@@ -3,7 +3,7 @@ from django.test import TestCase
 import settings
 from pages.models import *
 from django.test.client import Client
-from django.template import TemplateDoesNotExist
+from django.template import Template, RequestContext, TemplateDoesNotExist
 
 class PagesTestCase(TestCase):
     fixtures = ['tests.json']
@@ -170,5 +170,40 @@ class PagesTestCase(TestCase):
         self.test_05_edit_page()
         self.test_04_details_view()
 
-        
+    def test_07_show_content_tag(self):
+        """
+        Test the {% show_content %} template tag
+        """
+        c = Client()
+        c.login(username= 'batiste', password='b')
+        page_data = self.get_new_page_data()
+        response = c.post('/admin/pages/page/add/', page_data)
+        class request:
+            REQUEST = {'language': 'en'}
+        context = RequestContext(request, {'page': Page.objects.get(id=1)})
+        template = Template('{% load pages_tags %}'
+                            '{% show_content page "title" "en" %}')
+        self.assertEqual(template.render(context), page_data['title'] + '\n')
+        template = Template('{% load pages_tags %}'
+                            '{% show_content page "title" %}')
+        self.assertEqual(template.render(context), page_data['title'] + '\n')
 
+    def test_08_get_content_tag(self):
+        """
+        Test the {% get_content %} template tag
+        """
+        c = Client()
+        c.login(username= 'batiste', password='b')
+        page_data = self.get_new_page_data()
+        response = c.post('/admin/pages/page/add/', page_data)
+        class request:
+            REQUEST = {'language': 'en'}
+        context = RequestContext(request, {'page': Page.objects.get(id=1)})
+        template = Template('{% load pages_tags %}'
+                            '{% get_content page "title" "en" as content %}'
+                            '{{ content }}')
+        self.assertEqual(template.render(context), page_data['title'])
+        template = Template('{% load pages_tags %}'
+                            '{% get_content page "title" as content %}'
+                            '{{ content }}')
+        self.assertEqual(template.render(context), page_data['title'])
